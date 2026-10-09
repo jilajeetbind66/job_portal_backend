@@ -1,7 +1,5 @@
 <?php
-
 namespace App\Http\Controllers\Api\V1\Auth;
-
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegisterRequest;
@@ -29,6 +27,9 @@ class AuthController extends Controller
 
         $user->assignRole('candidate');
 
+        // Send email verification notification.
+        $user->sendEmailVerificationNotification();
+
         Auth::login($user);
 
         $request->session()->regenerate();
@@ -38,7 +39,7 @@ class AuthController extends Controller
         ]);
 
         return response()->json([
-            'message' => 'Registration successful.',
+            'message' => 'Registration successful. Please verify your email.',
             'user' => $this->userData($user),
         ], 201);
     }
@@ -93,10 +94,8 @@ class AuthController extends Controller
      */
     public function me(Request $request): JsonResponse
     {
-        $user = $request->user();
-
         return response()->json([
-            'user' => $this->userData($user),
+            'user' => $this->userData($request->user()),
         ]);
     }
 
@@ -104,16 +103,16 @@ class AuthController extends Controller
      * Logout the current user.
      */
     public function logout(Request $request): JsonResponse
-{
-    Auth::guard('web')->logout();
+    {
+        Auth::guard('web')->logout();
 
-    $request->session()->invalidate();
-    $request->session()->regenerateToken();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
 
-    return response()->json([
-        'message' => 'Logout successful.',
-    ]);
-}
+        return response()->json([
+            'message' => 'Logout successful.',
+        ]);
+    }
 
     /**
      * Format authenticated user data.
@@ -126,6 +125,8 @@ class AuthController extends Controller
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
+            'email_verified' => $user->hasVerifiedEmail(),
+            'email_verified_at' => $user->email_verified_at,
             'phone' => $user->phone,
             'status' => $user->status,
             'partner_id' => $user->partner_id,
