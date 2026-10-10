@@ -1,4 +1,6 @@
+
 <?php
+
 use App\Http\Controllers\Api\V1\Admin\AuditLogController;
 use App\Http\Controllers\Api\V1\Admin\AnalyticsController;
 use App\Http\Controllers\Api\V1\Admin\JobModerationController;
@@ -7,6 +9,7 @@ use App\Http\Controllers\Api\V1\Admin\UserController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
+use App\Http\Controllers\Api\V1\Partner\PartnerJobController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -53,7 +56,7 @@ Route::prefix('v1')->group(function () {
             ->middleware('signed')
             ->name('verification.verify');
 
-        // Authenticated Routes
+        // Authenticated Authentication Routes
         Route::middleware([
             'auth:sanctum',
             'user.active',
@@ -80,6 +83,46 @@ Route::prefix('v1')->group(function () {
 
     /*
     |--------------------------------------------------------------------------
+    | Partner Job Management Routes
+    |--------------------------------------------------------------------------
+    */
+
+    Route::middleware([
+        'auth:sanctum',
+        'user.active',
+        'partner.active',
+        'verified',
+    ])->prefix('partner')->group(function () {
+
+        // List the authenticated partner's jobs
+        Route::get('/jobs', [PartnerJobController::class, 'index'])
+            ->name('partner.jobs.index');
+
+        // Create a new draft job
+        Route::post('/jobs', [PartnerJobController::class, 'store'])
+            ->name('partner.jobs.store');
+
+        // Replace/update a job
+        Route::put('/jobs/{job}', [PartnerJobController::class, 'update'])
+            ->name('partner.jobs.update');
+
+        // Partially update a job
+        Route::patch('/jobs/{job}', [PartnerJobController::class, 'update'])
+            ->name('partner.jobs.patch');
+
+        // Delete a partner's own job
+        Route::delete('/jobs/{job}', [PartnerJobController::class, 'destroy'])
+            ->name('partner.jobs.destroy');
+
+        // Submit a draft job for Super Admin review
+        Route::post(
+            '/jobs/{job}/submit-review',
+            [PartnerJobController::class, 'submitForReview']
+        )->name('partner.jobs.submit-review');
+    });
+
+    /*
+    |--------------------------------------------------------------------------
     | Admin Routes
     |--------------------------------------------------------------------------
     */
@@ -88,6 +131,7 @@ Route::prefix('v1')->group(function () {
         'auth:sanctum',
         'user.active',
         'partner.active',
+        'verified',
     ])->prefix('admin')->group(function () {
 
         // Partner Management
@@ -103,8 +147,10 @@ Route::prefix('v1')->group(function () {
         Route::put('/partners/{partner}', [PartnerController::class, 'update'])
             ->name('admin.partners.update');
 
-        Route::patch('/partners/{partner}/status', [PartnerController::class, 'changeStatus'])
-            ->name('admin.partners.status');
+        Route::patch(
+            '/partners/{partner}/status',
+            [PartnerController::class, 'changeStatus']
+        )->name('admin.partners.status');
 
         // Job Moderation
         Route::get('/jobs', [JobModerationController::class, 'index'])
@@ -113,8 +159,10 @@ Route::prefix('v1')->group(function () {
         Route::get('/jobs/{job}', [JobModerationController::class, 'show'])
             ->name('admin.jobs.show');
 
-        Route::patch('/jobs/{job}/moderate', [JobModerationController::class, 'moderate'])
-            ->name('admin.jobs.moderate');
+        Route::patch(
+            '/jobs/{job}/moderate',
+            [JobModerationController::class, 'moderate']
+        )->name('admin.jobs.moderate');
 
         // User Management
         Route::get('/users', [UserController::class, 'index'])
@@ -129,8 +177,10 @@ Route::prefix('v1')->group(function () {
         Route::put('/users/{user}', [UserController::class, 'update'])
             ->name('admin.users.update');
 
-        Route::patch('/users/{user}/status', [UserController::class, 'changeStatus'])
-            ->name('admin.users.status');
+        Route::patch(
+            '/users/{user}/status',
+            [UserController::class, 'changeStatus']
+        )->name('admin.users.status');
 
         // Analytics
         Route::get('/analytics', [AnalyticsController::class, 'index'])

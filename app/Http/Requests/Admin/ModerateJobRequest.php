@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -25,6 +24,7 @@ class ModerateJobRequest extends FormRequest
             ],
 
             'note' => [
+                'required_if:status,rejected',
                 'nullable',
                 'string',
                 'max:1000',
@@ -36,11 +36,9 @@ class ModerateJobRequest extends FormRequest
     {
         return [
             'status.required' => 'Job moderation status is required.',
-
             'status.in' => 'Invalid moderation status. Allowed values are published, rejected, or closed.',
-
-            'note.string' => 'Moderation note must be a valid text.',
-
+            'note.required_if' => 'A rejection reason is required when rejecting a job.',
+            'note.string' => 'Moderation note must be valid text.',
             'note.max' => 'Moderation note may not exceed 1000 characters.',
         ];
     }

@@ -27,7 +27,7 @@ class AuthController extends Controller
 
         $user->assignRole('candidate');
 
-        // Send email verification notification.
+        // Send emailc verification notification.
         $user->sendEmailVerificationNotification();
 
         Auth::login($user);

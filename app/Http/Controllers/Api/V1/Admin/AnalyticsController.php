@@ -25,7 +25,9 @@ class AnalyticsController extends Controller
             ->groupBy('status')
             ->pluck('total', 'status');
 
-        $jobStatuses = Job::query()
+        // Platform-wide analytics must include every partner's jobs.
+        // Remove only the tenant scope for these admin analytics queries.
+        $jobStatuses = Job::withoutGlobalScope('partner')
             ->select('status', DB::raw('COUNT(*) as total'))
             ->groupBy('status')
             ->pluck('total', 'status');
@@ -79,7 +81,8 @@ class AnalyticsController extends Controller
                 ],
 
                 'jobs' => [
-                    'total' => Job::count(),
+                    // Count jobs across all partners.
+                    'total' => Job::withoutGlobalScope('partner')->count(),
                     'by_status' => $jobCounts,
                 ],
 

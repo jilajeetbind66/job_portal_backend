@@ -198,4 +198,52 @@ class AnalyticsTest extends TestCase
             $this->assertIsInt($signup['total']);
         }
     }
+
+
+public function test_super_admin_analytics_includes_jobs_from_all_partners(): void
+{
+    $partnerA = $this->createPartner(
+        'Analytics Partner A',
+        'analytics-partner-a'
+    );
+
+    $partnerB = $this->createPartner(
+        'Analytics Partner B',
+        'analytics-partner-b'
+    );
+
+    // Super admin has a partner_id, to test the global-scope edge case.
+    $admin = User::factory()->create([
+        'status' => 'active',
+        'partner_id' => $partnerA->id,
+    ]);
+
+    $admin->assignRole('super_admin');
+
+    $this->createJob(
+        $partnerA,
+        $admin,
+        'Partner A Analytics Job',
+        'partner-a-analytics-job',
+        'published'
+    );
+
+    $this->createJob(
+        $partnerB,
+        $admin,
+        'Partner B Analytics Job',
+        'partner-b-analytics-job',
+        'draft'
+    );
+
+    $response = $this->actingAs($admin)
+        ->getJson('/api/v1/admin/analytics');
+
+    $response
+        ->assertOk()
+        ->assertJsonPath('data.jobs.total', 2)
+        ->assertJsonPath('data.jobs.by_status.published', 1)
+        ->assertJsonPath('data.jobs.by_status.draft', 1);
 }
+
+    }

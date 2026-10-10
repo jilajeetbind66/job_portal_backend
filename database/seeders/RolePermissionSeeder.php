@@ -16,6 +16,7 @@ class RolePermissionSeeder extends Seeder
         $permissions = [
             // Candidate
             'jobs.view',
+            'jobs.submit-review',
             'jobs.apply',
             'jobs.save',
             'applications.view-own',
@@ -83,6 +84,7 @@ class RolePermissionSeeder extends Seeder
             'jobs.update',
             'jobs.delete',
             'jobs.view-own',
+            'jobs.submit-review',
             'applications.view',
             'applications.update-status',
             'candidates.view',
@@ -94,6 +96,7 @@ class RolePermissionSeeder extends Seeder
             'jobs.update',
             'jobs.delete',
             'jobs.view-own',
+            'jobs.submit-review',
             'applications.view',
             'applications.update-status',
             'candidates.view',

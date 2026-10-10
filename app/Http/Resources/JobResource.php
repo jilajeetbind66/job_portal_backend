@@ -39,6 +39,8 @@ class JobResource extends JsonResource
             'openings' => $this->openings,
 
             'status' => $this->status,
+            
+            'rejection_note' => $this->rejection_note,
 
             'published_at' => $this->published_at?->toISOString(),
 

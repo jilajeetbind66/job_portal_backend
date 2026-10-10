@@ -58,45 +58,51 @@ class JobModerationController extends Controller
         return new JobResource($job);
     }
 
-    public function moderate(
-        ModerateJobRequest $request,
-        Job $job,
-        AuditLogService $auditLogService
-    ): JobResource {
-        $this->authorize('moderate', $job);
+    
+public function moderate(
+    ModerateJobRequest $request,
+    Job $job,
+    AuditLogService $auditLogService
+): JobResource {
+    $this->authorize('moderate', $job);
 
-        $validated = $request->validated();
+    $validated = $request->validated();
 
-        $oldStatus = $job->status;
-        $newStatus = $validated['status'];
+    $oldStatus = $job->status;
+    $newStatus = $validated['status'];
+    $note = $validated['note'] ?? null;
 
-        $job->status = $newStatus;
+    $job->status = $newStatus;
 
-        if ($newStatus === 'published') {
-            $job->published_at = now();
-        }
-
-        if (
-            $newStatus !== 'published' &&
-            $oldStatus === 'published'
-        ) {
-            $job->published_at = null;
-        }
-
-        $job->save();
-
-        $auditLogService->log(
-            action: 'job.moderated',
-            subject: $job,
-            meta: [
-                'old_status' => $oldStatus,
-                'new_status' => $newStatus,
-            ],
-            partnerId: $job->partner_id,
-        );
-
-        $job->load(['partner', 'postedBy']);
-
-        return new JobResource($job);
+    $job->rejection_note = $newStatus === 'rejected' ? $note : null;
+    
+    if ($newStatus === 'published') {
+        $job->published_at = now();
     }
+
+    if (
+        $newStatus !== 'published' &&
+        $oldStatus === 'published'
+    ) {
+        $job->published_at = null;
+    }
+
+    $job->save();
+
+    $auditLogService->log(
+        action: 'job.moderated',
+        subject: $job,
+        meta: [
+            'old_status' => $oldStatus,
+            'new_status' => $newStatus,
+            'note' => $note,
+        ],
+        partnerId: $job->partner_id,
+    );
+
+    $job->load(['partner', 'postedBy']);
+
+    return new JobResource($job);
+}
+
 }

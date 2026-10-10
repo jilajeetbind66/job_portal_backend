@@ -1,10 +1,6 @@
 <?php
-
 namespace App\Models\Concerns;
-
-use App\Models\Partner;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 trait BelongsToPartner
 {
@@ -13,6 +9,12 @@ trait BelongsToPartner
         static::addGlobalScope('partner', function (Builder $builder) {
             $user = auth()->user();
 
+            // Super admin can access jobs across all partners.
+            if ($user?->hasRole('super_admin')) {
+                return;
+            }
+
+            // Other users remain restricted to their own partner.
             if ($user?->partner_id !== null) {
                 $builder->where(
                     $builder->getModel()->getTable() . '.partner_id',
@@ -24,14 +26,10 @@ trait BelongsToPartner
         static::creating(function ($model) {
             $user = auth()->user();
 
+            // Automatically assign the authenticated user's partner.
             if ($user?->partner_id !== null) {
                 $model->partner_id = $user->partner_id;
             }
         });
-    }
-
-    public function partner(): BelongsTo
-    {
-        return $this->belongsTo(Partner::class);
     }
 }

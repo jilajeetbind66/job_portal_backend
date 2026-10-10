@@ -415,5 +415,48 @@ class AuditLogTest extends TestCase
     }
 
 
+public function test_audit_log_filters_reject_invalid_pagination(): void
+{
+    $admin = $this->createSuperAdmin();
+
+    $response = $this->actingAs($admin)->getJson(
+        '/api/v1/admin/audit-logs?per_page=101'
+    );
+
+    $response
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['per_page']);
+}
+
+
+public function test_audit_log_filters_reject_invalid_date_range(): void
+{
+    $admin = $this->createSuperAdmin();
+
+    $response = $this->actingAs($admin)->getJson(
+        '/api/v1/admin/audit-logs?from=2026-10-10&to=2026-10-01'
+    );
+
+    $response
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['to']);
+}
+
+
+public function test_audit_log_filters_reject_invalid_ids(): void
+{
+    $admin = $this->createSuperAdmin();
+
+    $response = $this->actingAs($admin)->getJson(
+        '/api/v1/admin/audit-logs?actor_id=0&partner_id=-1'
+    );
+
+    $response
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors([
+            'actor_id',
+            'partner_id',
+        ]);
+}
 
     }

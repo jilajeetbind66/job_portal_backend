@@ -147,28 +147,35 @@ class JobModerationTest extends TestCase
         $this->assertNotNull($job->published_at);
     }
 
-    public function test_super_admin_can_reject_job(): void
-    {
-        $admin = $this->createSuperAdmin();
+    
+        public function test_super_admin_can_reject_job(): void
+        {
+            $admin = $this->createSuperAdmin();
 
-        $partner = $this->createPartner();
+            $partner = $this->createPartner();
 
-        $recruiter = $this->createPartnerAdmin($partner);
+            $recruiter = $this->createPartnerAdmin($partner);
 
-        $job = $this->createJob($partner, $recruiter);
+            $job = $this->createJob($partner, $recruiter);
 
-        $response = $this->actingAs($admin)
-            ->patchJson("/api/v1/admin/jobs/{$job->id}/moderate", [
-                'status' => 'rejected',
-                'note' => 'Job requires correction.',
-            ]);
+            $response = $this->actingAs($admin)
+                ->patchJson("/api/v1/admin/jobs/{$job->id}/moderate", [
+                    'status' => 'rejected',
+                    'note' => 'Job requires correction.',
+                ]);
 
-        $response
-            ->assertOk()
-            ->assertJsonPath('data.status', 'rejected');
+            $response
+                ->assertOk()
+                ->assertJsonPath('data.status', 'rejected')
+                ->assertJsonPath('data.rejection_note', 'Job requires correction.');
 
-        $this->assertSame('rejected', $job->refresh()->status);
-    }
+            $this->assertSame('rejected', $job->refresh()->status);
+
+            $this->assertSame(
+                'Job requires correction.',
+                $job->rejection_note
+            );
+        }
 
     public function test_super_admin_can_close_job(): void
     {
@@ -325,4 +332,57 @@ class JobModerationTest extends TestCase
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.status', 'pending_review');
     }
+
+    
+public function test_rejecting_job_requires_a_note(): void
+{
+    $admin = $this->createSuperAdmin();
+    $partner = $this->createPartner();
+    $recruiter = $this->createPartnerAdmin($partner);
+    $job = $this->createJob($partner, $recruiter);
+
+    $response = $this->actingAs($admin)
+        ->patchJson("/api/v1/admin/jobs/{$job->id}/moderate", [
+            'status' => 'rejected',
+        ]);
+
+    $response
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['note']);
+
+    $this->assertSame('pending_review', $job->refresh()->status);
+}
+
+public function test_rejection_note_is_saved_in_audit_log(): void
+{
+    $admin = $this->createSuperAdmin();
+    $partner = $this->createPartner();
+    $recruiter = $this->createPartnerAdmin($partner);
+    $job = $this->createJob($partner, $recruiter);
+
+    $note = 'Please correct the job description.';
+
+    $this->actingAs($admin)
+        ->patchJson("/api/v1/admin/jobs/{$job->id}/moderate", [
+            'status' => 'rejected',
+            'note' => $note,
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.status', 'rejected');
+
+    $log = \Illuminate\Support\Facades\DB::table('audit_logs')
+        ->where('action', 'job.moderated')
+        ->where('subject_id', $job->id)
+        ->latest('id')
+        ->first();
+
+    $this->assertNotNull($log);
+
+    $meta = json_decode($log->meta, true);
+
+    $this->assertSame('pending_review', $meta['old_status']);
+    $this->assertSame('rejected', $meta['new_status']);
+    $this->assertSame($note, $meta['note']);
+}
+
 }

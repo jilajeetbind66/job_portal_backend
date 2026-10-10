@@ -119,4 +119,19 @@ class EmailVerificationTest extends TestCase
             VerifyEmail::class
         );
     }
+
+public function test_unverified_user_cannot_access_admin_routes(): void
+{
+    $user = User::factory()->unverified()->create([
+        'status' => 'active',
+    ]);
+
+    Role::findOrCreate('super_admin', 'web');
+    $user->assignRole('super_admin');
+
+    $response = $this->actingAs($user)
+        ->getJson('/api/v1/admin/partners');
+
+    $response->assertForbidden();
 }
+    }

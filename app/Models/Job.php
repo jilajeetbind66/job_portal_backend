@@ -30,6 +30,7 @@ class Job extends Model
         'status',
         'published_at',
         'expires_at',
+        'rejection_note',
     ];
 
     protected function casts(): array
@@ -45,6 +46,10 @@ class Job extends Model
         ];
     }
 
+    public function partner(): BelongsTo
+{
+    return $this->belongsTo(Partner::class, 'partner_id');
+}
     public function postedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'posted_by');
