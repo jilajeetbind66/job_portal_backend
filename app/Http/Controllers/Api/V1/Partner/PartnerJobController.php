@@ -292,4 +292,68 @@ public function submitForReview(
     });
 }
 
+    public function updateStatus(
+        Request $request,
+        Job $job,
+        AuditLogService $auditLogService
+    ): JsonResponse {
+        $user = $request->user();
+
+        abort_unless(
+            $user !== null
+                && $user->partner_id !== null
+                && (int) $user->partner_id === (int) $job->partner_id
+                && $user->hasAnyRole(['partner_admin', 'partner_recruiter']),
+            403,
+            'You are not allowed to update this job status.'
+        );
+
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'in:draft,pending_review,closed'],
+        ]);
+
+        $targetStatus = $validated['status'];
+        $oldStatus = $job->status;
+
+        if ($targetStatus === 'pending_review') {
+            if (! in_array($oldStatus, ['draft', 'rejected'], true)) {
+                return response()->json([
+                    'message' => 'Only draft or rejected jobs can be submitted for review.',
+                ], 422);
+            }
+            $job->status = 'pending_review';
+            $job->rejection_note = null;
+            $job->published_at = null;
+        } elseif ($targetStatus === 'closed') {
+            if ($oldStatus !== 'published') {
+                return response()->json([
+                    'message' => 'Only published jobs can be closed.',
+                ], 422);
+            }
+            $job->status = 'closed';
+        } elseif ($targetStatus === 'draft') {
+            $job->status = 'draft';
+        }
+
+        $job->save();
+
+        $auditLogService->log(
+            action: 'job.status_updated',
+            subject: $job,
+            meta: [
+                'old_status' => $oldStatus,
+                'new_status' => $job->status,
+            ],
+            partnerId: $user->partner_id
+        );
+
+        $job->load(['partner', 'postedBy']);
+
+        return (new JobResource($job))
+            ->additional([
+                'message' => 'Job status updated successfully.',
+            ])
+            ->response()
+            ->setStatusCode(200);
+    }
 }

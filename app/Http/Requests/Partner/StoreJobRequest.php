@@ -1,6 +1,8 @@
 <?php
 namespace App\Http\Requests\Partner;
+
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class StoreJobRequest extends FormRequest
@@ -18,6 +20,51 @@ class StoreJobRequest extends FormRequest
             && $user->can('jobs.create');
     }
 
+    protected function prepareForValidation(): void
+    {
+        $merge = [];
+
+        if (!$this->filled('slug') && $this->filled('title')) {
+            $baseSlug = Str::slug($this->string('title')->toString());
+            $merge['slug'] = $baseSlug . '-' . Str::lower(Str::random(5));
+        }
+
+        if (!$this->filled('work_mode') && $this->filled('workplace_type')) {
+            $wpt = $this->string('workplace_type')->toString();
+            $merge['work_mode'] = ($wpt === 'on_site' || $wpt === 'onsite') ? 'onsite' : $wpt;
+        }
+
+        if (!$this->filled('openings')) {
+            $merge['openings'] = 1;
+        }
+
+        if (!$this->filled('expires_at') && $this->filled('deadline')) {
+            $merge['expires_at'] = $this->string('deadline')->toString();
+        }
+
+        if ($this->filled('skills') && is_string($this->skills)) {
+            $merge['skills'] = array_values(array_filter(array_map('trim', explode(',', $this->skills))));
+        }
+
+        if ($this->filled('experience_level') && (!$this->filled('min_exp') || $this->min_exp === null)) {
+            $level = $this->string('experience_level')->toString();
+            [$min, $max] = match ($level) {
+                'entry' => [0, 2],
+                'mid' => [3, 5],
+                'senior' => [6, 8],
+                default => [8, null],
+            };
+            $merge['min_exp'] = $min;
+            if ($max !== null) {
+                $merge['max_exp'] = $max;
+            }
+        }
+
+        if (!empty($merge)) {
+            $this->merge($merge);
+        }
+    }
+
     public function rules(): array
     {
         $partnerId = $this->user()?->partner_id;
@@ -29,7 +76,6 @@ class StoreJobRequest extends FormRequest
                 'required',
                 'string',
                 'max:255',
-                'alpha_dash',
                 Rule::unique('job_postings', 'slug')
                     ->where('partner_id', $partnerId),
             ],
@@ -88,7 +134,6 @@ class StoreJobRequest extends FormRequest
                 'sometimes',
                 'nullable',
                 'date',
-                'after:today',
             ],
         ];
     }

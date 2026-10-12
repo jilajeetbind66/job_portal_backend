@@ -11,6 +11,9 @@ use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Partner\PartnerJobController;
 use App\Http\Controllers\Api\V1\Partner\PartnerApplicationController;
+use App\Http\Controllers\Api\V1\Partner\PartnerDashboardController;
+use App\Http\Controllers\Api\V1\Partner\PartnerCompanyController;
+use App\Http\Controllers\Api\V1\Partner\PartnerRecruiterController;
 use App\Http\Controllers\Api\V1\Public\PublicJobController;
 use App\Http\Controllers\Api\V1\Candidate\CandidateController;
 use Illuminate\Support\Facades\Route;
@@ -112,6 +115,30 @@ Route::prefix('v1')->group(function () {
         'role:partner_admin|partner_recruiter',
     ])->prefix('partner')->group(function () {
 
+        // Partner Dashboard
+        Route::get('/dashboard', [PartnerDashboardController::class, 'index'])
+            ->name('partner.dashboard');
+
+        // Partner Company Profile
+        Route::get('/company', [PartnerCompanyController::class, 'show'])
+            ->name('partner.company.show');
+        Route::put('/company', [PartnerCompanyController::class, 'update'])
+            ->name('partner.company.update');
+        Route::post('/company/logo', [PartnerCompanyController::class, 'uploadLogo'])
+            ->name('partner.company.logo');
+
+        // Partner Recruiter Management
+        Route::get('/recruiters', [PartnerRecruiterController::class, 'index'])
+            ->name('partner.recruiters.index');
+        Route::post('/recruiters/invite', [PartnerRecruiterController::class, 'invite'])
+            ->name('partner.recruiters.invite');
+        Route::patch('/recruiters/{id}/role', [PartnerRecruiterController::class, 'updateRole'])
+            ->name('partner.recruiters.role');
+        Route::patch('/recruiters/{id}/status', [PartnerRecruiterController::class, 'toggleStatus'])
+            ->name('partner.recruiters.status');
+        Route::delete('/recruiters/{id}', [PartnerRecruiterController::class, 'destroy'])
+            ->name('partner.recruiters.destroy');
+
         // List the authenticated partner's jobs
         Route::get('/jobs', [PartnerJobController::class, 'index'])
             ->name('partner.jobs.index');
@@ -130,6 +157,10 @@ Route::prefix('v1')->group(function () {
         // Partially update a job
         Route::patch('/jobs/{job}', [PartnerJobController::class, 'update'])
             ->name('partner.jobs.patch');
+
+        // Change status of a job
+        Route::patch('/jobs/{job}/status', [PartnerJobController::class, 'updateStatus'])
+            ->name('partner.jobs.status');
 
         Route::patch('/jobs/{job}/close', [PartnerJobController::class, 'close'])
             ->name('partner.jobs.close');
@@ -182,6 +213,10 @@ Route::prefix('v1')->group(function () {
             ->middleware('role:super_admin')
             ->name('admin.partners.admin-user');
 
+        Route::post('/partners/{partner}/admins', [PartnerController::class, 'createAdminUser'])
+            ->middleware('role:super_admin')
+            ->name('admin.partners.admins');
+
         Route::patch('/partners/{partner}/suspend', [PartnerController::class, 'suspend'])
             ->middleware('role:super_admin')
             ->name('admin.partners.suspend');
@@ -195,7 +230,7 @@ Route::prefix('v1')->group(function () {
             [PartnerController::class, 'changeStatus']
         )->middleware('role:super_admin')->name('admin.partners.status');
 
-        // Job Moderation
+        // Job Moderation & Aliases
         Route::get('/jobs', [JobModerationController::class, 'index'])
             ->middleware('role:super_admin')
             ->name('admin.jobs.index');
@@ -216,6 +251,22 @@ Route::prefix('v1')->group(function () {
             '/jobs/{job}/moderate',
             [JobModerationController::class, 'moderate']
         )->middleware('role:super_admin')->name('admin.jobs.moderate');
+
+        Route::get('/moderation/jobs', [JobModerationController::class, 'index'])
+            ->middleware('role:super_admin')
+            ->name('admin.moderation.jobs.index');
+
+        Route::get('/moderation/jobs/{job}', [JobModerationController::class, 'show'])
+            ->middleware('role:super_admin')
+            ->name('admin.moderation.jobs.show');
+
+        Route::match(['post', 'patch'], '/moderation/jobs/{job}/approve', [JobModerationController::class, 'approve'])
+            ->middleware('role:super_admin')
+            ->name('admin.moderation.jobs.approve.post');
+
+        Route::match(['post', 'patch'], '/moderation/jobs/{job}/reject', [JobModerationController::class, 'reject'])
+            ->middleware('role:super_admin')
+            ->name('admin.moderation.jobs.reject.post');
 
         // User Management
         Route::get('/users', [UserController::class, 'index'])
@@ -242,6 +293,10 @@ Route::prefix('v1')->group(function () {
             ->middleware('role:super_admin|partner_admin')
             ->name('admin.users.roles');
 
+        Route::patch('/users/{user}/role', [UserController::class, 'updateRole'])
+            ->middleware('role:super_admin|partner_admin')
+            ->name('admin.users.roles.patch');
+
         Route::post('/users/{user}/force-password-reset', [UserController::class, 'forcePasswordReset'])
             ->middleware('role:super_admin')
             ->name('admin.users.force-password-reset');
@@ -263,6 +318,14 @@ Route::prefix('v1')->group(function () {
         Route::get('/analytics', [AnalyticsController::class, 'index'])
             ->middleware('role:super_admin')
             ->name('admin.analytics.index');
+
+        Route::get('/analytics/stats', [AnalyticsController::class, 'stats'])
+            ->middleware('role:super_admin')
+            ->name('admin.analytics.stats');
+
+        Route::get('/analytics/activity', [AnalyticsController::class, 'activity'])
+            ->middleware('role:super_admin')
+            ->name('admin.analytics.activity');
 
         // Audit Logs
         Route::get('/audit-logs', [AuditLogController::class, 'index'])

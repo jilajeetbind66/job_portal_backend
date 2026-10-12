@@ -1,7 +1,9 @@
 <?php
 namespace App\Http\Requests\Partner;
+
 use App\Models\Job;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class UpdateJobRequest extends FormRequest
@@ -17,6 +19,42 @@ class UpdateJobRequest extends FormRequest
             && (int) $user->partner_id === (int) $job->partner_id
             && $user->hasAnyRole(['partner_admin', 'partner_recruiter'])
             && $user->can('jobs.update');
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $merge = [];
+
+        if ($this->filled('workplace_type') && !$this->filled('work_mode')) {
+            $wpt = $this->string('workplace_type')->toString();
+            $merge['work_mode'] = ($wpt === 'on_site' || $wpt === 'onsite') ? 'onsite' : $wpt;
+        }
+
+        if ($this->filled('deadline') && !$this->filled('expires_at')) {
+            $merge['expires_at'] = $this->string('deadline')->toString();
+        }
+
+        if ($this->filled('skills') && is_string($this->skills)) {
+            $merge['skills'] = array_values(array_filter(array_map('trim', explode(',', $this->skills))));
+        }
+
+        if ($this->filled('experience_level') && (!$this->filled('min_exp') || $this->min_exp === null)) {
+            $level = $this->string('experience_level')->toString();
+            [$min, $max] = match ($level) {
+                'entry' => [0, 2],
+                'mid' => [3, 5],
+                'senior' => [6, 8],
+                default => [8, null],
+            };
+            $merge['min_exp'] = $min;
+            if ($max !== null) {
+                $merge['max_exp'] = $max;
+            }
+        }
+
+        if (!empty($merge)) {
+            $this->merge($merge);
+        }
     }
 
     public function rules(): array
@@ -36,7 +74,6 @@ class UpdateJobRequest extends FormRequest
                 'required',
                 'string',
                 'max:255',
-                'alpha_dash',
                 Rule::unique('job_postings', 'slug')
                     ->where('partner_id', $user->partner_id)
                     ->ignore($job->id),
@@ -122,7 +159,6 @@ class UpdateJobRequest extends FormRequest
                 'sometimes',
                 'nullable',
                 'date',
-                'after:today',
             ],
         ];
     }
