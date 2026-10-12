@@ -10,9 +10,21 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\EmailVerificationController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\Partner\PartnerJobController;
+use App\Http\Controllers\Api\V1\Partner\PartnerApplicationController;
+use App\Http\Controllers\Api\V1\Public\PublicJobController;
+use App\Http\Controllers\Api\V1\Candidate\CandidateController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
+
+    Route::prefix('public')->group(function () {
+        Route::get('/jobs', [PublicJobController::class, 'index'])
+            ->name('public.jobs.index');
+        Route::get('/jobs/{slug}', [PublicJobController::class, 'show'])
+            ->name('public.jobs.show');
+        Route::get('/companies/{slug}', [PublicJobController::class, 'company'])
+            ->name('public.companies.show');
+    });
 
     /*
     |--------------------------------------------------------------------------
@@ -20,66 +32,72 @@ Route::prefix('v1')->group(function () {
     |--------------------------------------------------------------------------
     */
 
-    Route::middleware('web')->group(function () {
+    // Stateful SPA requests receive the session and CSRF middleware from Sanctum.
+    Route::post('/auth/register', [AuthController::class, 'register'])
+        ->middleware('throttle:5,1')
+        ->name('auth.register');
 
-        // Registration
-        Route::post('/auth/register', [AuthController::class, 'register'])
-            ->middleware('throttle:5,1')
-            ->name('auth.register');
+    Route::post('/auth/login', [AuthController::class, 'login'])
+        ->middleware('throttle:5,1')
+        ->name('auth.login');
 
-        // Login
-        Route::post('/auth/login', [AuthController::class, 'login'])
-            ->middleware('throttle:5,1')
-            ->name('auth.login');
+    Route::post(
+        '/auth/forgot-password',
+        [PasswordResetController::class, 'forgotPassword']
+    )
+        ->middleware('throttle:5,1')
+        ->name('auth.password.email');
 
-        // Forgot Password
+    Route::post(
+        '/auth/reset-password',
+        [PasswordResetController::class, 'resetPassword']
+    )
+        ->middleware('throttle:5,1')
+        ->name('auth.password.reset');
+
+    Route::get(
+        '/auth/email/verify/{id}/{hash}',
+        [EmailVerificationController::class, 'verify']
+    )
+        ->middleware('signed')
+        ->name('verification.verify');
+
+    Route::middleware([
+        'auth:sanctum',
+        'user.active',
+        'partner.active',
+    ])->group(function () {
+        Route::get('/auth/me', [AuthController::class, 'me'])
+            ->name('auth.me');
+
+        Route::post('/auth/logout', [AuthController::class, 'logout'])
+            ->name('auth.logout');
+
         Route::post(
-            '/auth/forgot-password',
-            [PasswordResetController::class, 'forgotPassword']
+            '/auth/email/verification-notification',
+            [EmailVerificationController::class, 'resend']
         )
-            ->middleware('throttle:5,1')
-            ->name('auth.password.email');
-
-        // Reset Password
-        Route::post(
-            '/auth/reset-password',
-            [PasswordResetController::class, 'resetPassword']
-        )
-            ->middleware('throttle:5,1')
-            ->name('auth.password.reset');
-
-        // Verify Email
-        Route::get(
-            '/auth/email/verify/{id}/{hash}',
-            [EmailVerificationController::class, 'verify']
-        )
-            ->middleware('signed')
-            ->name('verification.verify');
-
-        // Authenticated Authentication Routes
-        Route::middleware([
-            'auth:sanctum',
-            'user.active',
-            'partner.active',
-        ])->group(function () {
-
-            // Current User
-            Route::get('/auth/me', [AuthController::class, 'me'])
-                ->name('auth.me');
-
-            // Logout
-            Route::post('/auth/logout', [AuthController::class, 'logout'])
-                ->name('auth.logout');
-
-            // Resend Verification Email
-            Route::post(
-                '/auth/email/verification-notification',
-                [EmailVerificationController::class, 'resend']
-            )
-                ->middleware('throttle:6,1')
-                ->name('verification.send');
-        });
+            ->middleware('throttle:6,1')
+            ->name('verification.send');
     });
+
+    Route::middleware(['auth:sanctum', 'user.active', 'partner.active', 'role:candidate'])
+        ->prefix('candidate')
+        ->group(function () {
+            Route::get('/profile', [CandidateController::class, 'profile'])->name('candidate.profile.show');
+            Route::put('/profile', [CandidateController::class, 'updateProfile'])->name('candidate.profile.update');
+            Route::post('/profile/resume', [CandidateController::class, 'uploadResume'])
+                ->middleware('throttle:10,1')->name('candidate.profile.resume.upload');
+            Route::get('/profile/resume/{user}', [CandidateController::class, 'downloadResume'])
+                ->middleware('signed')->name('candidate.resume.download');
+            Route::get('/dashboard', [CandidateController::class, 'dashboard'])->name('candidate.dashboard');
+            Route::get('/saved-jobs', [CandidateController::class, 'savedJobs'])->name('candidate.saved-jobs.index');
+            Route::post('/saved-jobs', [CandidateController::class, 'saveJob'])->name('candidate.saved-jobs.store');
+            Route::delete('/saved-jobs/{job}', [CandidateController::class, 'unsaveJob'])->name('candidate.saved-jobs.destroy');
+            Route::post('/jobs/{job}/apply', [CandidateController::class, 'apply'])->middleware('throttle:10,1')->name('candidate.jobs.apply');
+            Route::get('/applications', [CandidateController::class, 'applications'])->name('candidate.applications.index');
+            Route::patch('/applications/{application}/withdraw', [CandidateController::class, 'withdraw'])->name('candidate.applications.withdraw');
+        });
 
     /*
     |--------------------------------------------------------------------------
@@ -91,12 +109,15 @@ Route::prefix('v1')->group(function () {
         'auth:sanctum',
         'user.active',
         'partner.active',
-        'verified',
+        'role:partner_admin|partner_recruiter',
     ])->prefix('partner')->group(function () {
 
         // List the authenticated partner's jobs
         Route::get('/jobs', [PartnerJobController::class, 'index'])
             ->name('partner.jobs.index');
+
+        Route::get('/jobs/{job}', [PartnerJobController::class, 'show'])
+            ->name('partner.jobs.show');
 
         // Create a new draft job
         Route::post('/jobs', [PartnerJobController::class, 'store'])
@@ -110,6 +131,9 @@ Route::prefix('v1')->group(function () {
         Route::patch('/jobs/{job}', [PartnerJobController::class, 'update'])
             ->name('partner.jobs.patch');
 
+        Route::patch('/jobs/{job}/close', [PartnerJobController::class, 'close'])
+            ->name('partner.jobs.close');
+
         // Delete a partner's own job
         Route::delete('/jobs/{job}', [PartnerJobController::class, 'destroy'])
             ->name('partner.jobs.destroy');
@@ -119,6 +143,10 @@ Route::prefix('v1')->group(function () {
             '/jobs/{job}/submit-review',
             [PartnerJobController::class, 'submitForReview']
         )->name('partner.jobs.submit-review');
+
+        Route::get('/applications', [PartnerApplicationController::class, 'index'])->name('partner.applications.index');
+        Route::get('/applications/{application}', [PartnerApplicationController::class, 'show'])->name('partner.applications.show');
+        Route::patch('/applications/{application}/status', [PartnerApplicationController::class, 'updateStatus'])->name('partner.applications.status');
     });
 
     /*
@@ -131,63 +159,114 @@ Route::prefix('v1')->group(function () {
         'auth:sanctum',
         'user.active',
         'partner.active',
-        'verified',
     ])->prefix('admin')->group(function () {
 
         // Partner Management
         Route::get('/partners', [PartnerController::class, 'index'])
+            ->middleware('role:super_admin')
             ->name('admin.partners.index');
 
         Route::post('/partners', [PartnerController::class, 'store'])
+            ->middleware('role:super_admin')
             ->name('admin.partners.store');
 
         Route::get('/partners/{partner}', [PartnerController::class, 'show'])
+            ->middleware('role:super_admin|partner_admin')
             ->name('admin.partners.show');
 
         Route::put('/partners/{partner}', [PartnerController::class, 'update'])
+            ->middleware('role:super_admin|partner_admin')
             ->name('admin.partners.update');
+
+        Route::post('/partners/{partner}/admin-user', [PartnerController::class, 'createAdminUser'])
+            ->middleware('role:super_admin')
+            ->name('admin.partners.admin-user');
+
+        Route::patch('/partners/{partner}/suspend', [PartnerController::class, 'suspend'])
+            ->middleware('role:super_admin')
+            ->name('admin.partners.suspend');
+
+        Route::patch('/partners/{partner}/reactivate', [PartnerController::class, 'reactivate'])
+            ->middleware('role:super_admin')
+            ->name('admin.partners.reactivate');
 
         Route::patch(
             '/partners/{partner}/status',
             [PartnerController::class, 'changeStatus']
-        )->name('admin.partners.status');
+        )->middleware('role:super_admin')->name('admin.partners.status');
 
         // Job Moderation
         Route::get('/jobs', [JobModerationController::class, 'index'])
+            ->middleware('role:super_admin')
             ->name('admin.jobs.index');
 
         Route::get('/jobs/{job}', [JobModerationController::class, 'show'])
+            ->middleware('role:super_admin')
             ->name('admin.jobs.show');
+
+        Route::patch('/jobs/{job}/approve', [JobModerationController::class, 'approve'])
+            ->middleware('role:super_admin')
+            ->name('admin.jobs.approve');
+
+        Route::patch('/jobs/{job}/reject', [JobModerationController::class, 'reject'])
+            ->middleware('role:super_admin')
+            ->name('admin.jobs.reject');
 
         Route::patch(
             '/jobs/{job}/moderate',
             [JobModerationController::class, 'moderate']
-        )->name('admin.jobs.moderate');
+        )->middleware('role:super_admin')->name('admin.jobs.moderate');
 
         // User Management
         Route::get('/users', [UserController::class, 'index'])
+            ->middleware('role:super_admin|partner_admin')
             ->name('admin.users.index');
 
         Route::post('/users', [UserController::class, 'store'])
+            ->middleware('role:super_admin|partner_admin')
             ->name('admin.users.store');
 
         Route::get('/users/{user}', [UserController::class, 'show'])
+            ->middleware('role:super_admin|partner_admin')
             ->name('admin.users.show');
 
+        Route::delete('/users/{user}', [UserController::class, 'destroy'])
+            ->middleware('role:super_admin|partner_admin')
+            ->name('admin.users.destroy');
+
         Route::put('/users/{user}', [UserController::class, 'update'])
+            ->middleware('role:super_admin|partner_admin')
             ->name('admin.users.update');
+
+        Route::put('/users/{user}/roles', [UserController::class, 'updateRole'])
+            ->middleware('role:super_admin|partner_admin')
+            ->name('admin.users.roles');
+
+        Route::post('/users/{user}/force-password-reset', [UserController::class, 'forcePasswordReset'])
+            ->middleware('role:super_admin')
+            ->name('admin.users.force-password-reset');
+
+        Route::patch('/users/{user}/suspend', [UserController::class, 'suspend'])
+            ->middleware('role:super_admin|partner_admin')
+            ->name('admin.users.suspend');
+
+        Route::patch('/users/{user}/reactivate', [UserController::class, 'reactivate'])
+            ->middleware('role:super_admin|partner_admin')
+            ->name('admin.users.reactivate');
 
         Route::patch(
             '/users/{user}/status',
             [UserController::class, 'changeStatus']
-        )->name('admin.users.status');
+        )->middleware('role:super_admin|partner_admin')->name('admin.users.status');
 
         // Analytics
         Route::get('/analytics', [AnalyticsController::class, 'index'])
+            ->middleware('role:super_admin')
             ->name('admin.analytics.index');
 
         // Audit Logs
         Route::get('/audit-logs', [AuditLogController::class, 'index'])
+            ->middleware('role:super_admin')
             ->name('admin.audit-logs.index');
     });
 });

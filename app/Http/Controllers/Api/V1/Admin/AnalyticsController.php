@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AnalyticsController extends Controller
 {
@@ -44,6 +45,31 @@ class AnalyticsController extends Controller
 
         foreach ($jobStatusNames as $status) {
             $jobCounts[$status] = (int) ($jobStatuses[$status] ?? 0);
+        }
+
+        $applicationStatusNames = [
+            'applied',
+            'shortlisted',
+            'interview',
+            'offered',
+            'hired',
+            'rejected',
+            'withdrawn',
+        ];
+
+        $applicationStatuses = collect();
+
+        if (Schema::hasTable('applications')) {
+            $applicationStatuses = DB::table('applications')
+                ->select('status', DB::raw('COUNT(*) as total'))
+                ->groupBy('status')
+                ->pluck('total', 'status');
+        }
+
+        $applicationCounts = [];
+
+        foreach ($applicationStatusNames as $status) {
+            $applicationCounts[$status] = (int) ($applicationStatuses[$status] ?? 0);
         }
 
         // Include today and the previous six calendar days.
@@ -84,6 +110,15 @@ class AnalyticsController extends Controller
                     // Count jobs across all partners.
                     'total' => Job::withoutGlobalScope('partner')->count(),
                     'by_status' => $jobCounts,
+                ],
+
+                'candidates' => User::query()
+                    ->whereHas('roles', fn ($query) => $query->where('name', 'candidate'))
+                    ->count(),
+
+                'applications' => [
+                    'total' => array_sum($applicationCounts),
+                    'by_status' => $applicationCounts,
                 ],
 
                 'signups_per_day' => $signupsPerDay,

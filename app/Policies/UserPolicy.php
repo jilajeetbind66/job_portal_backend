@@ -4,11 +4,11 @@ namespace App\Policies;
 
 use App\Models\User;
 
-class UserPolicy
+class UserPolicy extends BasePolicy
 {
     public function viewAny(User $user): bool
     {
-        if ($user->hasRole('super_admin')) {
+        if ($this->isSuperAdmin($user)) {
             return $user->can('users.view');
         }
 
@@ -25,7 +25,7 @@ class UserPolicy
         |--------------------------------------------------------------------------
         */
 
-        if ($user->hasRole('super_admin')) {
+        if ($this->isSuperAdmin($user)) {
             return $user->can('users.view');
         }
 
@@ -35,8 +35,7 @@ class UserPolicy
         |--------------------------------------------------------------------------
         */
 
-        return $user->partner_id !== null
-            && $user->partner_id === $targetUser->partner_id
+        return $this->belongsToPartner($user, $targetUser->partner_id)
             && $user->hasRole('partner_admin')
             && $user->can('partner.users.manage');
     }
@@ -49,7 +48,7 @@ class UserPolicy
         |--------------------------------------------------------------------------
         */
 
-        if ($user->hasRole('super_admin')) {
+        if ($this->isSuperAdmin($user)) {
             return $user->can('users.create');
         }
 
@@ -72,7 +71,7 @@ class UserPolicy
         |--------------------------------------------------------------------------
         */
 
-        if ($user->hasRole('super_admin')) {
+        if ($this->isSuperAdmin($user)) {
             return $user->can('users.update');
         }
 
@@ -82,8 +81,7 @@ class UserPolicy
         |--------------------------------------------------------------------------
         */
 
-        return $user->partner_id !== null
-            && $user->partner_id === $targetUser->partner_id
+        return $this->belongsToPartner($user, $targetUser->partner_id)
             && $user->hasRole('partner_admin')
             && $user->can('partner.users.manage');
     }
@@ -96,7 +94,7 @@ class UserPolicy
         |--------------------------------------------------------------------------
         */
 
-        if ($user->hasRole('super_admin')) {
+        if ($this->isSuperAdmin($user)) {
             return $user->can('users.suspend');
         }
 
@@ -106,9 +104,15 @@ class UserPolicy
         |--------------------------------------------------------------------------
         */
 
-        return $user->partner_id !== null
-            && $user->partner_id === $targetUser->partner_id
+        return $this->belongsToPartner($user, $targetUser->partner_id)
             && $user->hasRole('partner_admin')
             && $user->can('partner.users.manage');
+    }
+
+    public function delete(User $user, User $targetUser): bool
+    {
+        return $this->isSuperAdmin($user)
+            && $user->can('users.delete')
+            && $user->id !== $targetUser->id;
     }
 }

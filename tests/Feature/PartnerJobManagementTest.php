@@ -136,6 +136,29 @@ class PartnerJobManagementTest extends TestCase
         ]);
     }
 
+    public function test_partner_can_open_and_close_own_job_using_frontend_routes(): void
+    {
+        $partner = $this->createPartner();
+        $admin = $this->createPartnerUser($partner);
+        $job = $this->createJob($partner, $admin, ['status' => 'published']);
+
+        $this->actingAs($admin)
+            ->getJson("/api/v1/partner/jobs/{$job->id}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $job->id)
+            ->assertJsonPath('data.status', 'published');
+
+        $this->patchJson("/api/v1/partner/jobs/{$job->id}/close")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'closed');
+
+        $this->assertDatabaseHas('job_postings', [
+            'id' => $job->id,
+            'partner_id' => $partner->id,
+            'status' => 'closed',
+        ]);
+    }
+
     public function test_client_cannot_spoof_job_ownership_or_status(): void
     {
         $partnerA = $this->createPartner();

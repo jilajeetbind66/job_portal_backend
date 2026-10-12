@@ -18,7 +18,11 @@ class Job extends Model
         'posted_by',
         'title',
         'slug',
+        'department',
         'description',
+        'requirements',
+        'skills',
+        'currency',
         'employment_type',
         'work_mode',
         'location',
@@ -43,6 +47,7 @@ class Job extends Model
             'openings' => 'integer',
             'published_at' => 'datetime',
             'expires_at' => 'datetime',
+            'skills' => 'array',
         ];
     }
 

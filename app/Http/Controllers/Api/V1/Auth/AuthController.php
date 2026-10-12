@@ -137,6 +137,9 @@ class AuthController extends Controller
                 'status' => $user->partner->status,
             ] : null,
             'role' => $user->roles->first()?->name,
+            'permissions' => $user->getAllPermissions()
+                ->pluck('name')
+                ->values(),
             'last_login_at' => $user->last_login_at,
         ];
     }

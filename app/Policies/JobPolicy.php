@@ -5,27 +5,27 @@ namespace App\Policies;
 use App\Models\Job;
 use App\Models\User;
 
-class JobPolicy
+class JobPolicy extends BasePolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->hasRole('super_admin')
+        return $this->isSuperAdmin($user)
             && $user->can('jobs.moderate');
     }
 
     public function view(User $user, Job $job): bool
     {
-        if ($user->hasRole('super_admin')) {
+        if ($this->isSuperAdmin($user)) {
             return $user->can('jobs.moderate');
         }
 
-        return $user->partner_id === $job->partner_id
+        return $this->belongsToPartner($user, $job->partner_id)
             && $user->can('jobs.view-own');
     }
 
     public function moderate(User $user, Job $job): bool
     {
-        return $user->hasRole('super_admin')
+        return $this->isSuperAdmin($user)
             && $user->can('jobs.moderate');
     }
 }

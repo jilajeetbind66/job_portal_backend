@@ -2,6 +2,7 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ModerateJobRequest;
+use App\Http\Requests\Admin\RejectJobRequest;
 use App\Http\Resources\JobResource;
 use App\Models\Job;
 use App\Services\AuditLogService;
@@ -58,51 +59,89 @@ class JobModerationController extends Controller
         return new JobResource($job);
     }
 
-    
-public function moderate(
-    ModerateJobRequest $request,
-    Job $job,
-    AuditLogService $auditLogService
-): JobResource {
-    $this->authorize('moderate', $job);
+    public function approve(Job $job, AuditLogService $auditLogService): JobResource
+    {
+        $this->authorize('moderate', $job);
 
-    $validated = $request->validated();
+        abort_unless(
+            $job->status === 'pending_review',
+            422,
+            'Only jobs pending review can be approved.'
+        );
 
-    $oldStatus = $job->status;
-    $newStatus = $validated['status'];
-    $note = $validated['note'] ?? null;
-
-    $job->status = $newStatus;
-
-    $job->rejection_note = $newStatus === 'rejected' ? $note : null;
-    
-    if ($newStatus === 'published') {
-        $job->published_at = now();
+        return $this->saveModeration($job, 'published', null, $auditLogService);
     }
 
-    if (
-        $newStatus !== 'published' &&
-        $oldStatus === 'published'
-    ) {
-        $job->published_at = null;
+    public function reject(
+        RejectJobRequest $request,
+        Job $job,
+        AuditLogService $auditLogService
+    ): JobResource {
+        $this->authorize('moderate', $job);
+
+        abort_unless(
+            $job->status === 'pending_review',
+            422,
+            'Only jobs pending review can be rejected.'
+        );
+
+        return $this->saveModeration(
+            $job,
+            'rejected',
+            $request->validated('reason'),
+            $auditLogService
+        );
     }
 
-    $job->save();
+    public function moderate(
+        ModerateJobRequest $request,
+        Job $job,
+        AuditLogService $auditLogService
+    ): JobResource {
+        $this->authorize('moderate', $job);
 
-    $auditLogService->log(
-        action: 'job.moderated',
-        subject: $job,
-        meta: [
-            'old_status' => $oldStatus,
-            'new_status' => $newStatus,
-            'note' => $note,
-        ],
-        partnerId: $job->partner_id,
-    );
+        $validated = $request->validated();
 
-    $job->load(['partner', 'postedBy']);
+        return $this->saveModeration(
+            $job,
+            $validated['status'],
+            $validated['note'] ?? null,
+            $auditLogService
+        );
+    }
 
-    return new JobResource($job);
-}
+    private function saveModeration(
+        Job $job,
+        string $newStatus,
+        ?string $note,
+        AuditLogService $auditLogService
+    ): JobResource {
+        $oldStatus = $job->status;
+        $job->status = $newStatus;
+        $job->rejection_note = $newStatus === 'rejected' ? $note : null;
+
+        if ($newStatus === 'published') {
+            $job->published_at = now();
+        } elseif ($oldStatus === 'published') {
+            $job->published_at = null;
+        }
+
+        $job->save();
+
+        $auditLogService->log(
+            action: 'job.moderated',
+            subject: $job,
+            meta: [
+                'old_status' => $oldStatus,
+                'new_status' => $newStatus,
+                'note' => $note,
+            ],
+            partnerId: $job->partner_id,
+        );
+
+        $job->load(['partner', 'postedBy']);
+
+        return new JobResource($job);
+    }
 
 }

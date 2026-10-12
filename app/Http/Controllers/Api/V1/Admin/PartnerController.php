@@ -1,13 +1,23 @@
 <?php
 namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StorePartnerAdminRequest;
 use App\Http\Requests\Admin\StorePartnerRequest;
 use App\Http\Requests\Admin\UpdatePartnerRequest;
 use App\Http\Resources\PartnerResource;
+use App\Http\Resources\UserResource;
 use App\Models\Partner;
+use App\Models\User;
 use App\Services\AuditLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class PartnerController extends Controller
 {
@@ -53,11 +63,15 @@ class PartnerController extends Controller
     public function store(StorePartnerRequest $request): JsonResponse
     {
         $this->authorize('create', Partner::class);
+        $logoPath = $request->file('logo')?->storePublicly(
+            'partner-logos',
+            config('filesystems.partner_logo_disk')
+        );
 
         $partner = Partner::create([
             'name' => $request->validated('name'),
             'slug' => $request->validated('slug'),
-            'logo_path' => $request->validated('logo_path'),
+            'logo_path' => $logoPath,
             'industry' => $request->validated('industry'),
             'website' => $request->validated('website'),
             'about' => $request->validated('about'),
@@ -98,6 +112,19 @@ class PartnerController extends Controller
         Partner $partner
     ): PartnerResource {
         $this->authorize('update', $partner);
+        $validated = $request->validated();
+        $logo = $request->file('logo');
+        $logoDisk = config('filesystems.partner_logo_disk');
+        $oldLogoPath = $partner->logo_path;
+
+        unset($validated['logo']);
+
+        if ($logo !== null) {
+            $validated['logo_path'] = $logo->storePublicly(
+                'partner-logos',
+                $logoDisk
+            );
+        }
 
         $oldValues = $partner->only([
             'name',
@@ -109,7 +136,11 @@ class PartnerController extends Controller
             'max_active_jobs',
         ]);
 
-        $partner->update($request->validated());
+        $partner->update($validated);
+
+        if ($logo !== null && $oldLogoPath !== null) {
+            Storage::disk($logoDisk)->delete($oldLogoPath);
+        }
 
         $partner->refresh();
 
@@ -144,8 +175,6 @@ class PartnerController extends Controller
         Request $request,
         Partner $partner
     ): PartnerResource {
-        $this->authorize('changeStatus', $partner);
-
         $validated = $request->validate([
             'status' => [
                 'required',
@@ -153,24 +182,90 @@ class PartnerController extends Controller
             ],
         ]);
 
-        $oldStatus = $partner->status;
-        $newStatus = $validated['status'];
+        return $this->setStatus($partner, $validated['status']);
+    }
 
-        $partner->update([
-            'status' => $newStatus,
+    public function suspend(Partner $partner): PartnerResource
+    {
+        return $this->setStatus($partner, 'suspended');
+    }
+
+    public function reactivate(Partner $partner): PartnerResource
+    {
+        return $this->setStatus($partner, 'active');
+    }
+
+    public function createAdminUser(
+        StorePartnerAdminRequest $request,
+        Partner $partner
+    ): JsonResponse {
+        $this->authorize('createAdminUser', $partner);
+
+        $user = User::create([
+            'name' => $request->validated('name'),
+            'email' => $request->validated('email'),
+            'password' => Hash::make(Str::random(64)),
+            'partner_id' => $partner->id,
+            'status' => 'active',
         ]);
 
-        if ($oldStatus !== $newStatus) {
-            $this->auditLogService->log(
-                action: 'partner.status_changed',
-                subject: $partner,
-                meta: [
-                    'old_status' => $oldStatus,
-                    'new_status' => $newStatus,
-                ],
-                partnerId: $partner->id,
-            );
-        }
+        $user->assignRole('partner_admin');
+        $user->load(['partner', 'roles']);
+
+        Password::sendResetLink(['email' => $user->email]);
+
+        $this->auditLogService->log(
+            action: 'partner.admin_user_created',
+            subject: $user,
+            meta: ['role' => 'partner_admin'],
+            partnerId: $partner->id,
+        );
+
+        return (new UserResource($user))
+            ->additional(['message' => 'Partner Admin created and set-password link sent.'])
+            ->response()
+            ->setStatusCode(201);
+    }
+
+    private function setStatus(Partner $partner, string $newStatus): PartnerResource
+    {
+        $this->authorize('changeStatus', $partner);
+
+        $oldStatus = $partner->status;
+
+        DB::transaction(function () use ($partner, $newStatus, $oldStatus): void {
+            $partner->update(['status' => $newStatus]);
+
+            if ($newStatus === 'suspended' && $oldStatus !== 'suspended') {
+                $userIds = $partner->users()->pluck('users.id');
+                $sessionTable = config('session.table');
+
+                if ($userIds->isNotEmpty()) {
+                    if (Schema::hasTable($sessionTable)) {
+                        DB::table($sessionTable)
+                            ->whereIn('user_id', $userIds)
+                            ->delete();
+                    }
+
+                    PersonalAccessToken::query()
+                        ->where('tokenable_type', (new User())->getMorphClass())
+                        ->whereIn('tokenable_id', $userIds)
+                        ->delete();
+                }
+            }
+
+            if ($oldStatus !== $newStatus) {
+                $this->auditLogService->log(
+                    action: 'partner.status_changed',
+                    subject: $partner,
+                    meta: [
+                        'old_status' => $oldStatus,
+                        'new_status' => $newStatus,
+                    ],
+                    partnerId: $partner->id,
+                );
+            }
+        });
 
         $partner->loadCount('users');
 

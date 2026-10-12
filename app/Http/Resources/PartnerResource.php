@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class PartnerResource extends JsonResource
 {
@@ -17,6 +18,9 @@ class PartnerResource extends JsonResource
             'name' => $this->name,
             'slug' => $this->slug,
             'logo_path' => $this->logo_path,
+            'logo_url' => $this->logo_path
+                ? Storage::disk(config('filesystems.partner_logo_disk'))->url($this->logo_path)
+                : null,
             'industry' => $this->industry,
             'website' => $this->website,
             'about' => $this->about,

@@ -4,7 +4,12 @@ namespace Tests\Feature;
 
 use App\Models\Partner;
 use App\Models\User;
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -109,6 +114,96 @@ class PartnerManagementTest extends TestCase
             'created_by' => $admin->id,
             'status' => 'active',
         ]);
+    }
+
+    public function test_super_admin_can_create_partner_admin_and_send_set_password_link(): void
+    {
+        Notification::fake();
+
+        $admin = $this->createSuperAdmin();
+        $partner = $this->createPartner();
+
+        $response = $this->actingAs($admin)
+            ->postJson("/api/v1/admin/partners/{$partner->id}/admin-user", [
+                'name' => 'Acme Partner Admin',
+                'email' => 'acme-admin@example.com',
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.partner_id', $partner->id)
+            ->assertJsonPath('data.role', 'partner_admin')
+            ->assertJsonPath('message', 'Partner Admin created and set-password link sent.');
+
+        $partnerAdmin = User::query()
+            ->where('email', 'acme-admin@example.com')
+            ->firstOrFail();
+
+        $this->assertSame($partner->id, $partnerAdmin->partner_id);
+        $this->assertNull($partnerAdmin->email_verified_at);
+        Notification::assertSentTo($partnerAdmin, ResetPassword::class);
+
+        $this->actingAs($partnerAdmin)
+            ->getJson("/api/v1/admin/partners/{$partner->id}")
+            ->assertOk();
+
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $admin->id,
+            'partner_id' => $partner->id,
+            'action' => 'partner.admin_user_created',
+            'subject_id' => $partnerAdmin->id,
+        ]);
+    }
+
+    public function test_super_admin_can_upload_a_partner_logo(): void
+    {
+        Storage::fake('public');
+        config(['filesystems.partner_logo_disk' => 'public']);
+
+        $admin = $this->createSuperAdmin();
+
+        $response = $this->actingAs($admin)->post(
+            '/api/v1/admin/partners',
+            [
+                'name' => 'Logo Partner',
+                'slug' => 'logo-partner',
+                'max_active_jobs' => 20,
+                'logo' => UploadedFile::fake()->create('logo.png', 1, 'image/png'),
+            ],
+            ['Accept' => 'application/json']
+        );
+
+        $response->assertCreated();
+
+        $partner = Partner::query()
+            ->where('slug', 'logo-partner')
+            ->firstOrFail();
+
+        Storage::disk('public')->assertExists($partner->logo_path);
+        $this->assertNotNull($response->json('data.logo_url'));
+    }
+
+    public function test_partner_logo_update_replaces_the_previous_file(): void
+    {
+        Storage::fake('public');
+        config(['filesystems.partner_logo_disk' => 'public']);
+
+        $admin = $this->createSuperAdmin();
+        $partner = $this->createPartner([
+            'logo_path' => 'partner-logos/old-logo.png',
+        ]);
+        Storage::disk('public')->put($partner->logo_path, 'old-logo');
+
+        $response = $this->actingAs($admin)->put(
+            "/api/v1/admin/partners/{$partner->id}",
+            ['logo' => UploadedFile::fake()->create('new-logo.png', 1, 'image/png')],
+            ['Accept' => 'application/json']
+        );
+
+        $response->assertOk();
+        $partner->refresh();
+
+        Storage::disk('public')->assertExists($partner->logo_path);
+        Storage::disk('public')->assertMissing('partner-logos/old-logo.png');
     }
 
     public function test_non_super_admin_cannot_create_partner(): void
@@ -266,9 +361,7 @@ class PartnerManagementTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)
-            ->patchJson("/api/v1/admin/partners/{$partner->id}/status", [
-                'status' => 'suspended',
-            ]);
+            ->patchJson("/api/v1/admin/partners/{$partner->id}/suspend");
 
         $response
             ->assertOk()
@@ -289,9 +382,7 @@ class PartnerManagementTest extends TestCase
         ]);
 
         $response = $this->actingAs($admin)
-            ->patchJson("/api/v1/admin/partners/{$partner->id}/status", [
-                'status' => 'active',
-            ]);
+            ->patchJson("/api/v1/admin/partners/{$partner->id}/reactivate");
 
         $response
             ->assertOk()
@@ -300,6 +391,31 @@ class PartnerManagementTest extends TestCase
         $this->assertDatabaseHas('partners', [
             'id' => $partner->id,
             'status' => 'active',
+        ]);
+    }
+
+    public function test_suspending_partner_revokes_its_database_sessions(): void
+    {
+        $admin = $this->createSuperAdmin();
+        $partner = $this->createPartner();
+        $partnerUser = $this->createPartnerAdmin($partner);
+
+        DB::table('sessions')->insert([
+            'id' => 'partner-user-session',
+            'user_id' => $partnerUser->id,
+            'ip_address' => '127.0.0.1',
+            'user_agent' => 'PHPUnit',
+            'payload' => 'session-payload',
+            'last_activity' => now()->timestamp,
+        ]);
+
+        $this->actingAs($admin)
+            ->patchJson("/api/v1/admin/partners/{$partner->id}/suspend")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'suspended');
+
+        $this->assertDatabaseMissing('sessions', [
+            'id' => 'partner-user-session',
         ]);
     }
 

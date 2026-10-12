@@ -5,6 +5,7 @@ use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\URL;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -16,6 +17,7 @@ class EmailVerificationTest extends TestCase
     {
         parent::setUp();
 
+        config(['sanctum.stateful' => ['localhost:5173']]);
         Role::findOrCreate('candidate', 'web');
     }
 
@@ -29,7 +31,7 @@ class EmailVerificationTest extends TestCase
             'phone' => '9876543210',
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
-        ]);
+        ], ['Origin' => 'http://localhost:5173']);
 
         $response->assertCreated()
             ->assertJsonPath('user.email_verified', false);
@@ -120,18 +122,19 @@ class EmailVerificationTest extends TestCase
         );
     }
 
-public function test_unverified_user_cannot_access_admin_routes(): void
+public function test_unverified_super_admin_can_access_admin_routes(): void
 {
     $user = User::factory()->unverified()->create([
         'status' => 'active',
     ]);
 
-    Role::findOrCreate('super_admin', 'web');
+    Permission::findOrCreate('partners.view', 'web');
+    Role::findOrCreate('super_admin', 'web')->givePermissionTo('partners.view');
     $user->assignRole('super_admin');
 
     $response = $this->actingAs($user)
         ->getJson('/api/v1/admin/partners');
 
-    $response->assertForbidden();
+    $response->assertOk();
 }
     }

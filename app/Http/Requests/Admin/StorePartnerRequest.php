@@ -29,10 +29,11 @@ class StorePartnerRequest extends FormRequest
                 Rule::unique('partners', 'slug'),
             ],
 
-            'logo_path' => [
+            'logo' => [
                 'nullable',
-                'string',
-                'max:500',
+                'image',
+                'mimes:jpg,jpeg,png,webp',
+                'max:2048',
             ],
 
             'industry' => [

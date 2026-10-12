@@ -5,7 +5,7 @@ namespace App\Policies;
 use App\Models\Partner;
 use App\Models\User;
 
-class PartnerPolicy
+class PartnerPolicy extends BasePolicy
 {
     /**
      * Determine whether the user can view any partners.
@@ -20,11 +20,11 @@ class PartnerPolicy
      */
     public function view(User $user, Partner $partner): bool
     {
-        if ($user->hasRole('super_admin')) {
+        if ($this->isSuperAdmin($user)) {
             return true;
         }
 
-        return $user->partner_id === $partner->id
+        return $this->belongsToPartner($user, $partner->id)
             && $user->can('partner.view');
     }
 
@@ -33,8 +33,14 @@ class PartnerPolicy
      */
     public function create(User $user): bool
     {
-        return $user->hasRole('super_admin')
+        return $this->isSuperAdmin($user)
             && $user->can('partners.create');
+    }
+
+    public function createAdminUser(User $user, Partner $partner): bool
+    {
+        return $this->isSuperAdmin($user)
+            && $user->can('users.create');
     }
 
     /**
@@ -42,11 +48,11 @@ class PartnerPolicy
      */
     public function update(User $user, Partner $partner): bool
     {
-        if ($user->hasRole('super_admin')) {
+        if ($this->isSuperAdmin($user)) {
             return $user->can('partners.update');
         }
 
-        return $user->partner_id === $partner->id
+        return $this->belongsToPartner($user, $partner->id)
             && $user->hasRole('partner_admin')
             && $user->can('partner.update');
     }
@@ -56,7 +62,7 @@ class PartnerPolicy
      */
     public function changeStatus(User $user, Partner $partner): bool
     {
-        return $user->hasRole('super_admin')
+        return $this->isSuperAdmin($user)
             && $user->can('partners.suspend');
     }
 }

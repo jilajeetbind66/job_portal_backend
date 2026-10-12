@@ -5,13 +5,18 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
+use App\Http\Requests\Admin\UpdateUserRoleRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AuditLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Schema;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class UserController extends Controller
 {
@@ -27,6 +32,10 @@ class UserController extends Controller
         $query = User::query()
             ->with(['partner', 'roles'])
             ->latest();
+
+        if ($request->user()->hasRole('partner_admin')) {
+            $query->where('partner_id', $request->user()->partner_id);
+        }
 
         if ($request->filled('search')) {
             $search = $request->string('search')->toString();
@@ -179,6 +188,36 @@ class UserController extends Controller
         return new UserResource($user);
     }
 
+    public function destroy(User $user): JsonResponse
+    {
+        $this->authorize('delete', $user);
+
+        $this->auditLogService->log(
+            action: 'user.deleted',
+            subject: $user,
+            meta: [
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->roles()->value('name'),
+            ],
+            partnerId: $user->partner_id,
+        );
+
+        $sessionTable = config('session.table');
+        if (Schema::hasTable($sessionTable)) {
+            DB::table($sessionTable)->where('user_id', $user->id)->delete();
+        }
+
+        PersonalAccessToken::query()
+            ->where('tokenable_type', $user->getMorphClass())
+            ->where('tokenable_id', $user->id)
+            ->delete();
+
+        $user->delete();
+
+        return response()->json(['message' => 'User deleted successfully.']);
+    }
+
     public function update(
         UpdateUserRequest $request,
         User $user
@@ -280,12 +319,74 @@ class UserController extends Controller
         return new UserResource($user);
     }
 
+    public function updateRole(
+        UpdateUserRoleRequest $request,
+        User $user
+    ): UserResource {
+        $this->authorize('update', $user);
+
+        $role = $request->validated('role');
+        $actor = $request->user();
+
+        if ($actor->hasRole('partner_admin')) {
+            if (! in_array($role, ['candidate', 'partner_recruiter'], true)) {
+                abort(403, 'Partner Admin cannot assign this role.');
+            }
+
+            $partnerId = $role === 'candidate' ? null : $actor->partner_id;
+        } else {
+            $partnerId = $request->validated('partner_id') ?? $user->partner_id;
+
+            if (in_array($role, ['candidate', 'super_admin'], true)) {
+                $partnerId = null;
+            } elseif ($partnerId === null) {
+                abort(422, 'This role requires a partner.');
+            }
+        }
+
+        $oldRole = $user->roles()->value('name');
+        $user->update(['partner_id' => $partnerId]);
+        $user->syncRoles([$role]);
+        $user->load(['partner', 'roles']);
+
+        $this->auditLogService->log(
+            action: 'user.role_changed',
+            subject: $user,
+            meta: [
+                'old_role' => $oldRole,
+                'new_role' => $role,
+            ],
+            partnerId: $user->partner_id,
+        );
+
+        return new UserResource($user);
+    }
+
+    public function forcePasswordReset(User $user): JsonResponse
+    {
+        $this->authorize('update', $user);
+
+        $status = Password::sendResetLink(['email' => $user->email]);
+
+        if ($status !== Password::RESET_LINK_SENT) {
+            return response()->json(['message' => __($status)], 422);
+        }
+
+        $this->auditLogService->log(
+            action: 'user.password_reset_requested',
+            subject: $user,
+            partnerId: $user->partner_id,
+        );
+
+        return response()->json([
+            'message' => 'Password reset link sent successfully.',
+        ]);
+    }
+
     public function changeStatus(
         Request $request,
         User $user
     ): UserResource|JsonResponse {
-        $this->authorize('changeStatus', $user);
-
         $validated = $request->validate([
             'status' => [
                 'required',
@@ -293,16 +394,27 @@ class UserController extends Controller
             ],
         ]);
 
-        /*
-        |--------------------------------------------------------------------------
-        | User cannot suspend own account
-        |--------------------------------------------------------------------------
-        */
+        return $this->setStatus($request, $user, $validated['status']);
+    }
 
-        if (
-            $request->user()->id === $user->id
-            && $validated['status'] === 'suspended'
-        ) {
+    public function suspend(Request $request, User $user): UserResource|JsonResponse
+    {
+        return $this->setStatus($request, $user, 'suspended');
+    }
+
+    public function reactivate(Request $request, User $user): UserResource|JsonResponse
+    {
+        return $this->setStatus($request, $user, 'active');
+    }
+
+    private function setStatus(
+        Request $request,
+        User $user,
+        string $newStatus
+    ): UserResource|JsonResponse {
+        $this->authorize('changeStatus', $user);
+
+        if ($request->user()->id === $user->id && $newStatus === 'suspended') {
             return response()->json([
                 'message' => 'You cannot suspend your own account.',
             ], 422);
@@ -310,21 +422,38 @@ class UserController extends Controller
 
         $oldStatus = $user->status;
 
-        $user->update([
-            'status' => $validated['status'],
-        ]);
+        DB::transaction(function () use ($user, $newStatus, $oldStatus): void {
+            $user->update(['status' => $newStatus]);
+
+            if ($newStatus === 'suspended' && $oldStatus !== 'suspended') {
+                $sessionTable = config('session.table');
+
+                if (Schema::hasTable($sessionTable)) {
+                    DB::table($sessionTable)
+                        ->where('user_id', $user->id)
+                        ->delete();
+                }
+
+                PersonalAccessToken::query()
+                    ->where('tokenable_type', $user->getMorphClass())
+                    ->where('tokenable_id', $user->id)
+                    ->delete();
+            }
+
+            if ($oldStatus !== $newStatus) {
+                $this->auditLogService->log(
+                    action: 'user.status_changed',
+                    subject: $user,
+                    meta: [
+                        'old_status' => $oldStatus,
+                        'new_status' => $newStatus,
+                    ],
+                    partnerId: $user->partner_id,
+                );
+            }
+        });
 
         $user->load(['partner', 'roles']);
-
-        $this->auditLogService->log(
-            action: 'user.status_changed',
-            subject: $user,
-            meta: [
-                'old_status' => $oldStatus,
-                'new_status' => $user->status,
-            ],
-            partnerId: $user->partner_id,
-        );
 
         return new UserResource($user);
     }

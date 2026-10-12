@@ -36,11 +36,12 @@ class UpdatePartnerRequest extends FormRequest
                 Rule::unique('partners', 'slug')->ignore($partnerId),
             ],
 
-            'logo_path' => [
+            'logo' => [
                 'sometimes',
                 'nullable',
-                'string',
-                'max:500',
+                'image',
+                'mimes:jpg,jpeg,png,webp',
+                'max:2048',
             ],
 
             'industry' => [

@@ -91,6 +91,40 @@ class PartnerJobUpdateTest extends TestCase
         ]);
     }
 
+    public function test_partner_admin_can_update_own_job_using_put(): void
+    {
+        $partner = $this->createPartner();
+        $admin = $this->createPartnerUser($partner);
+        $job = $this->createJob($partner, $admin);
+
+        $this->actingAs($admin)
+            ->putJson("/api/v1/partner/jobs/{$job->id}", [
+                'title' => 'PUT Updated Developer',
+                'slug' => 'put-updated-developer',
+                'description' => 'Updated job description.',
+                'employment_type' => 'full_time',
+                'work_mode' => 'hybrid',
+                'location' => 'Delhi',
+                'min_exp' => 2,
+                'max_exp' => 4,
+                'salary_min' => 50000,
+                'salary_max' => 80000,
+                'openings' => 3,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.title', 'PUT Updated Developer')
+            ->assertJsonPath('data.slug', 'put-updated-developer')
+            ->assertJsonPath('data.status', 'draft');
+
+        $this->assertDatabaseHas('job_postings', [
+            'id' => $job->id,
+            'partner_id' => $partner->id,
+            'title' => 'PUT Updated Developer',
+            'slug' => 'put-updated-developer',
+            'status' => 'draft',
+        ]);
+    }
+
     public function test_partner_can_partially_update_job_without_changing_other_fields(): void
     {
         $partner = $this->createPartner();

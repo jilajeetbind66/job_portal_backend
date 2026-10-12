@@ -19,6 +19,7 @@ class AuditLogController extends Controller
         );
 
         $validated = $request->validate([
+            'search' => ['sometimes', 'string', 'max:255'],
             'action' => ['sometimes', 'string', 'max:100'],
             'actor_id' => ['sometimes', 'integer', 'min:1'],
             'partner_id' => ['sometimes', 'integer', 'min:1'],
@@ -33,6 +34,20 @@ class AuditLogController extends Controller
                 'partner:id,name',
             ])
             ->latest('created_at');
+
+        if (isset($validated['search'])) {
+            $search = $validated['search'];
+
+            $query->where(function ($builder) use ($search) {
+                $builder->where('action', 'like', "%{$search}%")
+                    ->orWhere('subject_type', 'like', "%{$search}%")
+                    ->orWhereHas('actor', fn ($actor) => $actor
+                        ->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%"))
+                    ->orWhereHas('partner', fn ($partner) => $partner
+                        ->where('name', 'like', "%{$search}%"));
+            });
+        }
 
         if (isset($validated['action'])) {
             $query->where('action', $validated['action']);

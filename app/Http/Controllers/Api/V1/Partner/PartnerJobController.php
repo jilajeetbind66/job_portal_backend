@@ -74,7 +74,11 @@ class PartnerJobController extends Controller
             'posted_by' => $user->id,
             'title' => $validated['title'],
             'slug' => $validated['slug'],
+            'department' => $validated['department'] ?? null,
             'description' => $validated['description'],
+            'requirements' => $validated['requirements'] ?? null,
+            'skills' => $validated['skills'] ?? [],
+            'currency' => $validated['currency'] ?? 'INR',
             'employment_type' => $validated['employment_type'],
             'work_mode' => $validated['work_mode'],
             'location' => $validated['location'] ?? null,
@@ -105,6 +109,22 @@ class PartnerJobController extends Controller
             ->setStatusCode(201);
     }
 
+    public function show(Request $request, Job $job): JobResource
+    {
+        abort_unless(
+            $request->user()?->partner_id !== null
+                && (int) $request->user()->partner_id === (int) $job->partner_id
+                && $request->user()->hasAnyRole(['partner_admin', 'partner_recruiter'])
+                && $request->user()->can('jobs.view-own'),
+            404,
+            'Job not found.'
+        );
+
+        $job->load(['partner', 'postedBy']);
+
+        return new JobResource($job);
+    }
+
     public function update(
         UpdateJobRequest $request,
         Job $job,
@@ -133,6 +153,35 @@ class PartnerJobController extends Controller
             ])
             ->response()
             ->setStatusCode(200);
+    }
+
+    public function close(Request $request, Job $job, AuditLogService $auditLogService): JsonResponse|JobResource
+    {
+        $user = $request->user();
+
+        abort_unless(
+            $user !== null
+                && $user->partner_id !== null
+                && (int) $user->partner_id === (int) $job->partner_id
+                && $user->hasAnyRole(['partner_admin', 'partner_recruiter'])
+                && $user->can('jobs.close'),
+            403,
+            'You are not allowed to close this job.'
+        );
+
+        abort_unless($job->status === 'published', 422, 'Only published jobs can be closed.');
+
+        $job->update(['status' => 'closed']);
+        $auditLogService->log(
+            action: 'job.closed',
+            subject: $job,
+            meta: ['old_status' => 'published', 'new_status' => 'closed'],
+            partnerId: $user->partner_id
+        );
+
+        $job->load(['partner', 'postedBy']);
+
+        return new JobResource($job);
     }
 
     public function destroy(

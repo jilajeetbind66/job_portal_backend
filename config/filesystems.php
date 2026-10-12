@@ -14,6 +14,7 @@ return [
     */
 
     'default' => env('FILESYSTEM_DISK', 'local'),
+    'partner_logo_disk' => env('PARTNER_LOGO_DISK', 'public'),
 
     /*
     |--------------------------------------------------------------------------

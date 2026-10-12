@@ -48,6 +48,12 @@ class UpdateJobRequest extends FormRequest
                 'string',
             ],
 
+            'department' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'requirements' => ['sometimes', 'nullable', 'string'],
+            'skills' => ['sometimes', 'array'],
+            'skills.*' => ['string', 'max:100'],
+            'currency' => ['sometimes', 'string', 'size:3', Rule::in(['INR', 'USD', 'EUR', 'GBP'])],
+
             'employment_type' => [
                 'sometimes',
                 'required',

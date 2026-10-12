@@ -147,6 +147,37 @@ class JobModerationTest extends TestCase
         $this->assertNotNull($job->published_at);
     }
 
+    public function test_super_admin_can_approve_job_on_architecture_endpoint(): void
+    {
+        $admin = $this->createSuperAdmin();
+        $partner = $this->createPartner();
+        $recruiter = $this->createPartnerAdmin($partner);
+        $job = $this->createJob($partner, $recruiter);
+
+        $this->actingAs($admin)
+            ->patchJson("/api/v1/admin/jobs/{$job->id}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'published');
+
+        $this->assertNotNull($job->refresh()->published_at);
+    }
+
+    public function test_super_admin_can_reject_job_with_reason_on_architecture_endpoint(): void
+    {
+        $admin = $this->createSuperAdmin();
+        $partner = $this->createPartner();
+        $recruiter = $this->createPartnerAdmin($partner);
+        $job = $this->createJob($partner, $recruiter);
+
+        $this->actingAs($admin)
+            ->patchJson("/api/v1/admin/jobs/{$job->id}/reject", [
+                'reason' => 'Please clarify the job requirements.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'rejected')
+            ->assertJsonPath('data.rejection_note', 'Please clarify the job requirements.');
+    }
+
     
         public function test_super_admin_can_reject_job(): void
         {

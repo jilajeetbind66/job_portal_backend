@@ -1,5 +1,8 @@
 <?php
 namespace App\Providers;
+use App\Models\Partner;
+use App\Models\User;
+use App\Observers\AuditLogObserver;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\URL;
@@ -14,6 +17,9 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        Partner::observe(AuditLogObserver::class);
+        User::observe(AuditLogObserver::class);
+
         // Password reset link opens in React frontend.
         ResetPassword::createUrlUsing(function ($user, string $token): string {
             return 'http://localhost:5173/reset-password?' . http_build_query([

@@ -90,6 +90,18 @@ class AnalyticsTest extends TestCase
                             'rejected',
                         ],
                     ],
+                    'applications' => [
+                        'total',
+                        'by_status' => [
+                            'applied',
+                            'shortlisted',
+                            'interview',
+                            'offered',
+                            'hired',
+                            'rejected',
+                            'withdrawn',
+                        ],
+                    ],
                     'signups_per_day',
                 ],
             ]);
@@ -167,7 +179,10 @@ class AnalyticsTest extends TestCase
             ->assertJsonPath('data.jobs.by_status.published', 1)
             ->assertJsonPath('data.jobs.by_status.closed', 0)
             ->assertJsonPath('data.jobs.by_status.rejected', 0)
-            ->assertJsonPath('data.jobs.by_status.pending_review', 0);
+            ->assertJsonPath('data.jobs.by_status.pending_review', 0)
+            ->assertJsonPath('data.applications.total', 0)
+            ->assertJsonPath('data.applications.by_status.applied', 0)
+            ->assertJsonPath('data.applications.by_status.withdrawn', 0);
     }
 
     public function test_analytics_returns_seven_days_of_signup_data(): void

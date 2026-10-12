@@ -13,6 +13,13 @@ class AuthAndTenantFoundationTest extends TestCase
 
     protected $seed = true;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['sanctum.stateful' => ['localhost:5173']]);
+    }
+
     public function test_candidate_can_register_and_get_authenticated_user(): void
     {
         $response = $this->postJson('/api/v1/auth/register', [
@@ -20,7 +27,7 @@ class AuthAndTenantFoundationTest extends TestCase
             'email' => 'john@example.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
-        ]);
+        ], ['Origin' => 'http://localhost:5173']);
 
         $response->assertStatus(201)
             ->assertJsonPath('user.email', 'john@example.com')
@@ -33,6 +40,10 @@ class AuthAndTenantFoundationTest extends TestCase
         ]);
 
         $this->assertAuthenticated();
+
+        $this->getJson('/api/v1/auth/me', ['Origin' => 'http://localhost:5173'])
+            ->assertOk()
+            ->assertJsonPath('user.email', 'john@example.com');
     }
 
     public function test_active_user_can_fetch_current_profile(): void
@@ -51,6 +62,11 @@ class AuthAndTenantFoundationTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('user.email', 'active@example.com')
             ->assertJsonPath('user.status', 'active');
+
+        $this->assertContains(
+            'jobs.view',
+            $response->json('user.permissions')
+        );
     }
 
     public function test_suspended_user_is_blocked(): void
@@ -109,7 +125,7 @@ class AuthAndTenantFoundationTest extends TestCase
         $response = $this->postJson('/api/v1/auth/login', [
             'email' => 'login@example.com',
             'password' => 'password123',
-        ]);
+        ], ['Origin' => 'http://localhost:5173']);
 
         $response->assertOk()
             ->assertJson([
@@ -119,6 +135,10 @@ class AuthAndTenantFoundationTest extends TestCase
             ->assertJsonPath('user.role', 'candidate');
 
         $this->assertAuthenticated();
+
+        $this->getJson('/api/v1/auth/me', ['Origin' => 'http://localhost:5173'])
+            ->assertOk()
+            ->assertJsonPath('user.email', 'login@example.com');
 
         $user->refresh();
 
@@ -237,13 +257,15 @@ public function test_authenticated_user_can_logout(): void
     $loginResponse = $this->postJson('/api/v1/auth/login', [
         'email' => 'logout@example.com',
         'password' => 'password123',
-    ]);
+    ], ['Origin' => 'http://localhost:5173']);
 
     $loginResponse->assertOk();
 
     $this->assertAuthenticated();
 
-    $logoutResponse = $this->postJson('/api/v1/auth/logout');
+    $logoutResponse = $this->postJson('/api/v1/auth/logout', [], [
+        'Origin' => 'http://localhost:5173',
+    ]);
 
     $logoutResponse->assertOk()
         ->assertJson([
@@ -310,5 +332,26 @@ public function test_authenticated_user_can_logout(): void
         $response = $this->getJson('/api/v1/auth/me');
 
         $response->assertUnauthorized();
+    }
+
+    public function test_cors_allows_the_configured_frontend_with_credentials(): void
+    {
+        config([
+            'cors.allowed_origins' => ['http://localhost:5173'],
+            'cors.supports_credentials' => true,
+        ]);
+
+        $response = $this->call('OPTIONS', '/api/v1/auth/login', server: [
+            'HTTP_ORIGIN' => 'http://localhost:5173',
+            'HTTP_ACCESS_CONTROL_REQUEST_METHOD' => 'POST',
+            'HTTP_ACCESS_CONTROL_REQUEST_HEADERS' => 'content-type,x-xsrf-token',
+        ]);
+
+        $response->assertNoContent();
+        $response->assertHeader(
+            'access-control-allow-origin',
+            'http://localhost:5173'
+        );
+        $response->assertHeader('access-control-allow-credentials', 'true');
     }
 }

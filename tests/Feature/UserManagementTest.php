@@ -4,8 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Partner;
 use App\Models\User;
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -64,6 +67,41 @@ class UserManagementTest extends TestCase
                 'links',
                 'meta',
             ]);
+    }
+
+    public function test_partner_admin_user_list_only_contains_own_partner_users(): void
+    {
+        $partnerA = $this->createPartner('List Partner A', 'list-partner-a');
+        $partnerB = $this->createPartner('List Partner B', 'list-partner-b');
+        $admin = $this->createPartnerAdmin($partnerA);
+        $userA = User::factory()->create(['partner_id' => $partnerA->id]);
+        $userB = User::factory()->create(['partner_id' => $partnerB->id]);
+
+        $response = $this->actingAs($admin)
+            ->getJson('/api/v1/admin/users');
+
+        $response->assertOk()
+            ->assertJsonFragment(['id' => $userA->id])
+            ->assertJsonMissing(['id' => $userB->id]);
+    }
+
+    public function test_super_admin_can_delete_user_and_audit_the_action(): void
+    {
+        $admin = $this->createSuperAdmin();
+        $user = User::factory()->create(['name' => 'Delete Me']);
+        $user->assignRole('candidate');
+
+        $this->actingAs($admin)
+            ->deleteJson("/api/v1/admin/users/{$user->id}")
+            ->assertOk()
+            ->assertJson(['message' => 'User deleted successfully.']);
+
+        $this->assertDatabaseMissing('users', ['id' => $user->id]);
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $admin->id,
+            'action' => 'user.deleted',
+            'subject_id' => $user->id,
+        ]);
     }
 
     public function test_super_admin_can_create_candidate(): void
@@ -302,6 +340,50 @@ class UserManagementTest extends TestCase
         ]);
     }
 
+    public function test_super_admin_can_change_user_role_on_roles_endpoint(): void
+    {
+        $admin = $this->createSuperAdmin();
+        $partner = $this->createPartner('Role Partner', 'role-partner');
+        $user = User::factory()->create(['partner_id' => null]);
+        $user->assignRole('candidate');
+
+        $this->actingAs($admin)
+            ->putJson("/api/v1/admin/users/{$user->id}/roles", [
+                'role' => 'partner_recruiter',
+                'partner_id' => $partner->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.role', 'partner_recruiter')
+            ->assertJsonPath('data.partner_id', $partner->id);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $admin->id,
+            'action' => 'user.role_changed',
+            'subject_id' => $user->id,
+        ]);
+    }
+
+    public function test_super_admin_can_force_user_password_reset(): void
+    {
+        Notification::fake();
+
+        $admin = $this->createSuperAdmin();
+        $user = User::factory()->create(['email' => 'force-reset@example.com']);
+        $user->assignRole('candidate');
+
+        $this->actingAs($admin)
+            ->postJson("/api/v1/admin/users/{$user->id}/force-password-reset")
+            ->assertOk()
+            ->assertJsonPath('message', 'Password reset link sent successfully.');
+
+        Notification::assertSentTo($user, ResetPassword::class);
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $admin->id,
+            'action' => 'user.password_reset_requested',
+            'subject_id' => $user->id,
+        ]);
+    }
+
     public function test_partner_admin_can_update_user_from_same_partner(): void
     {
         $partner = $this->createPartner(
@@ -379,10 +461,27 @@ class UserManagementTest extends TestCase
 
         $user->assignRole('candidate');
 
+        DB::table('sessions')->insert([
+            'id' => 'user-session-to-revoke',
+            'user_id' => $user->id,
+            'ip_address' => '127.0.0.1',
+            'user_agent' => 'PHPUnit',
+            'payload' => 'session-payload',
+            'last_activity' => now()->timestamp,
+        ]);
+
+        DB::table('personal_access_tokens')->insert([
+            'tokenable_type' => $user->getMorphClass(),
+            'tokenable_id' => $user->id,
+            'name' => 'test-token',
+            'token' => hash('sha256', 'test-token-value'),
+            'abilities' => json_encode(['*']),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
         $response = $this->actingAs($admin)
-            ->patchJson("/api/v1/admin/users/{$user->id}/status", [
-                'status' => 'suspended',
-            ]);
+            ->patchJson("/api/v1/admin/users/{$user->id}/suspend");
 
         $response
             ->assertOk()
@@ -392,6 +491,25 @@ class UserManagementTest extends TestCase
             'id' => $user->id,
             'status' => 'suspended',
         ]);
+
+        $this->assertDatabaseMissing('sessions', [
+            'id' => 'user-session-to-revoke',
+        ]);
+        $this->assertDatabaseMissing('personal_access_tokens', [
+            'token' => hash('sha256', 'test-token-value'),
+        ]);
+    }
+
+    public function test_super_admin_can_reactivate_user(): void
+    {
+        $admin = $this->createSuperAdmin();
+        $user = User::factory()->create(['status' => 'suspended']);
+        $user->assignRole('candidate');
+
+        $this->actingAs($admin)
+            ->patchJson("/api/v1/admin/users/{$user->id}/reactivate")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'active');
     }
 
     public function test_partner_admin_can_suspend_user_from_same_partner(): void

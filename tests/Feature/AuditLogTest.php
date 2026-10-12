@@ -6,7 +6,9 @@ use App\Models\User;
 use App\Models\Job;
 use App\Services\AuditLogService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Tests\TestCase;
+use Illuminate\Support\Facades\Route;
 
 class AuditLogTest extends TestCase
 {
@@ -198,6 +200,78 @@ class AuditLogTest extends TestCase
             'action' => 'partner.created',
             'subject_type' => Partner::class,
             'subject_id' => $partner->id,
+        ]);
+    }
+
+    public function test_partner_portal_model_updates_are_audited_by_observer(): void
+    {
+        $partner = $this->createPartner('Observer Partner', 'observer-partner');
+        $partnerAdmin = User::factory()->create([
+            'partner_id' => $partner->id,
+            'status' => 'active',
+        ]);
+        $partnerAdmin->assignRole('partner_admin');
+
+        Route::put('/api/v1/partner/test-audit/{partner}', function (
+            Request $request,
+            string $partnerId
+        ) {
+            Partner::query()
+                ->findOrFail($partnerId)
+                ->update(['about' => 'Updated from partner portal.']);
+
+            return response()->json([
+                'ok' => true,
+                'actor_partner_id' => $request->user()->partner_id,
+                'path' => $request->path(),
+            ]);
+        })->middleware('auth:sanctum')->name('partner.test-audit');
+
+        $this->actingAs($partnerAdmin)
+            ->putJson("/api/v1/partner/test-audit/{$partner->id}")
+            ->assertOk()
+            ->assertJsonPath('actor_partner_id', $partner->id)
+            ->assertJsonPath('path', "api/v1/partner/test-audit/{$partner->id}");
+
+        $this->assertSame(
+            'Updated from partner portal.',
+            $partner->fresh()->about
+        );
+
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $partnerAdmin->id,
+            'partner_id' => $partner->id,
+            'action' => 'partner.updated',
+            'subject_type' => Partner::class,
+            'subject_id' => $partner->id,
+        ]);
+
+        $recruiter = User::factory()->create([
+            'partner_id' => $partner->id,
+            'status' => 'active',
+        ]);
+        $recruiter->assignRole('partner_recruiter');
+
+        Route::put('/api/v1/partner/test-audit-user/{user}', function (
+            Request $request,
+            string $userId
+        ) {
+            User::query()->findOrFail($userId)
+                ->update(['name' => 'Updated from partner portal.']);
+
+            return response()->json(['ok' => true]);
+        })->middleware('auth:sanctum')->name('partner.test-audit-user');
+
+        $this->actingAs($partnerAdmin)
+            ->putJson("/api/v1/partner/test-audit-user/{$recruiter->id}")
+            ->assertOk();
+
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $partnerAdmin->id,
+            'partner_id' => $partner->id,
+            'action' => 'user.updated',
+            'subject_type' => User::class,
+            'subject_id' => $recruiter->id,
         ]);
     }
 
@@ -397,6 +471,7 @@ class AuditLogTest extends TestCase
             . '?action=partner.created'
             . '&actor_id=' . $admin->id
             . '&partner_id=' . $partner->id
+            . '&search=Audit Filter Partner'
             . '&per_page=1'
         );
 
