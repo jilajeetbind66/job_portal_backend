@@ -28,6 +28,12 @@ class AuthController extends Controller
         $user->assignRole('candidate');
 
         // Send emailc verification notification.
+        try{
+            $user->sendEmailVerificationNotification();
+        } catch (\Throwable $e) {
+            report($e); // error log hoga, par register fail nahi hoga
+        }
+        
         $user->sendEmailVerificationNotification();
 
         Auth::login($user);
